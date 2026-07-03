@@ -5,6 +5,9 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
+  - enabled: 1
+    path: Assets/InterviewDemo/FinancialDataRoom/Scenes/VR_Financial_Data_Room.unity
+    guid: 9ba7a98fc5dc6954caaee70666bf80a3
   - enabled: 0
     path: Assets/_Course Library/Source Files/Sample Scenes/ModernRoom_Sample.unity
     guid: bbae9a62884d5c744bb7fed2e671b6a4
@@ -74,7 +77,7 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Challenges/03_Training/Scenes/Training_Prototype_Broken.unity
     guid: e10ba84ccef4c43aa995ace104c1bf8c
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Basic_Hotel.unity
     guid: 27db7de597d97c24fb816fd22b8ecb07
   m_configObjects:
