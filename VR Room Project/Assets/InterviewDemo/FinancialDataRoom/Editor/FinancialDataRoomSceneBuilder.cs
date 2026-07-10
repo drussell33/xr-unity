@@ -39,6 +39,7 @@ namespace InterviewDemo.FinancialDataRoom.Editor
         const float DashboardZ = 5.82f;
         const float ConsoleZ = 2f;
         const float SpawnZ = -3.75f;
+        const int IgnoreRaycastLayer = 2;
 
         // The player starts south of the presentation and looks toward world +Z.
         // "Audience facing" therefore means a surface normal pointing toward world -Z.
@@ -48,6 +49,10 @@ namespace InterviewDemo.FinancialDataRoom.Editor
         static readonly Vector3 CanvasReadableLocalFront = Vector3.back;
         static readonly Vector3 WallVisualAuthoredLocalFront = Vector3.forward;
         static readonly Vector3 TabletopVisualAuthoredLocalFront = Vector3.forward;
+        static readonly Vector3 GuidePosition = new Vector3(2.15f, 0f, 4.85f);
+        static readonly Vector3 GuideSubtitlePosition = new Vector3(2.15f, 2.10f, 4.80f);
+        static readonly Vector3 GuideReplayPosition = new Vector3(1.55f, 1.02f, 4.35f);
+        static readonly Vector3 GuideFacingTarget = new Vector3(0f, 1.40f, ConsoleZ);
 
         const string RoomPath = "Assets/_Course Library/_Prefabs/Rooms/Room_Modern.prefab";
         const string TablePath = "Assets/_Course Library/_Prefabs/Tables/Table_Dining_Modern_Dark.prefab";
@@ -70,10 +75,24 @@ namespace InterviewDemo.FinancialDataRoom.Editor
             DemoRoot + "/Scripts/FinancialPhysicalControl.cs";
         const string ActionButtonScriptPath =
             DemoRoot + "/Scripts/FinancialActionButton.cs";
+        const string GuideScriptPath =
+            DemoRoot + "/Scripts/FinancialGuideController.cs";
         const string ScreenMaterialPath =
             "Assets/_Course Library/Materials/Object Materials/Material_Screen.mat";
         const string WallMaterialPath =
             DemoRoot + "/Materials/FinancialRoom_Wall_Neutral.mat";
+        const string GuideMaterialPath =
+            DemoRoot + "/Materials/FinancialGuide_Hologram.mat";
+        const string GuideWelcomeAudioPath =
+            DemoRoot + "/Audio/PortfolioGuide_Welcome.wav";
+        const string GuideRiskAudioPath =
+            DemoRoot + "/Audio/PortfolioGuide_Risk.wav";
+        const string GuideHorizonAudioPath =
+            DemoRoot + "/Audio/PortfolioGuide_Horizon.wav";
+        const string GuideStressAudioPath =
+            DemoRoot + "/Audio/PortfolioGuide_MarketStress.wav";
+        const string GuideAnalysisAudioPath =
+            DemoRoot + "/Audio/PortfolioGuide_AnalysisComplete.wav";
 
         const string XrOriginPath =
             "Assets/Samples/XR Interaction Toolkit/3.0.8/Starter Assets/Prefabs/XR Origin (XR Rig).prefab";
@@ -153,7 +172,8 @@ namespace InterviewDemo.FinancialDataRoom.Editor
                 BuildXrFoundation(experienceLayout);
 
                 var dashboard = BuildDashboard(experienceLayout);
-                BuildControlsAndController(experienceLayout, dashboard);
+                var guide = BuildPortfolioGuide(experienceLayout);
+                BuildControlsAndController(experienceLayout, dashboard, guide);
                 DisableVerifiedRoomStyleSource(experienceLayout, roomStyleSource);
 
                 if (!EditorSceneManager.SaveScene(scene, ScenePath))
@@ -192,6 +212,8 @@ namespace InterviewDemo.FinancialDataRoom.Editor
             RequireAsset<GameObject>(SimulatorPath, missing);
             RequireAsset<Material>(ScreenMaterialPath, missing);
             RequireAsset<Material>(WallMaterialPath, missing);
+            RequireAsset<Material>(GuideMaterialPath, missing);
+            RequireGuideMaterial(missing);
 
             RequireControlVisual(KnobVisualPrefabPath, string.Empty, missing);
             RequireControlVisual(SliderVisualPrefabPath, "Dimmer_Handle", missing);
@@ -201,6 +223,7 @@ namespace InterviewDemo.FinancialDataRoom.Editor
 
             RequireScriptType<FinancialPhysicalControl>(PhysicalControlScriptPath, missing);
             RequireScriptType<FinancialActionButton>(ActionButtonScriptPath, missing);
+            RequireScriptType<FinancialGuideController>(GuideScriptPath, missing);
             ValidateFinancialModelSamples(missing);
 
             if (missing.Count == 0)
@@ -284,6 +307,28 @@ namespace InterviewDemo.FinancialDataRoom.Editor
         {
             if (AssetDatabase.LoadAssetAtPath<T>(path) == null)
                 missing.Add(path);
+        }
+
+        static void RequireGuideMaterial(ICollection<string> validationErrors)
+        {
+            var material = AssetDatabase.LoadAssetAtPath<Material>(GuideMaterialPath);
+            if (material == null)
+                return;
+
+            if (AssetDatabase.GetAssetPath(material) != GuideMaterialPath)
+                validationErrors.Add(GuideMaterialPath + " (material must be project-owned)");
+
+            if (material.shader == null ||
+                material.shader.name != "Universal Render Pipeline/Unlit")
+            {
+                validationErrors.Add(GuideMaterialPath + " (must use URP/Unlit)");
+            }
+
+            if (material.color.a < 0.85f)
+                validationErrors.Add(GuideMaterialPath + " (opacity must be at least 0.85)");
+
+            if (material.HasProperty("_Surface") && material.GetFloat("_Surface") != 0f)
+                validationErrors.Add(GuideMaterialPath + " (must start in opaque mode)");
         }
 
         static void RequireRoomStructure(ICollection<string> missing)
@@ -1141,9 +1186,318 @@ namespace InterviewDemo.FinancialDataRoom.Editor
             return line;
         }
 
+        static FinancialGuideController BuildPortfolioGuide(Transform parent)
+        {
+            var guideMaterial = AssetDatabase.LoadAssetAtPath<Material>(GuideMaterialPath);
+            if (guideMaterial == null)
+                throw new InvalidOperationException(
+                    "The project-owned guide material could not be loaded: " +
+                    GuideMaterialPath);
+
+            var guideFacing = Vector3.ProjectOnPlane(
+                GuideFacingTarget - GuidePosition,
+                WorldUp).normalized;
+            var guideRoot = new GameObject("Portfolio Guide").transform;
+            guideRoot.SetParent(parent, false);
+            guideRoot.SetPositionAndRotation(
+                GuidePosition,
+                Quaternion.LookRotation(guideFacing, WorldUp));
+            guideRoot.gameObject.layer = IgnoreRaycastLayer;
+
+            var body = new GameObject("Hologram Body").transform;
+            body.SetParent(guideRoot, false);
+            body.gameObject.layer = IgnoreRaycastLayer;
+
+            CreateHologramPrimitive(
+                "Base Platform",
+                PrimitiveType.Cylinder,
+                body,
+                new Vector3(0f, 0.025f, 0f),
+                new Vector3(0.32f, 0.025f, 0.32f),
+                Quaternion.identity,
+                guideMaterial);
+            var speakingRing = CreateHologramPrimitive(
+                "Speaking Ring",
+                PrimitiveType.Cylinder,
+                body,
+                new Vector3(0f, 0.065f, 0f),
+                new Vector3(0.38f, 0.012f, 0.38f),
+                Quaternion.identity,
+                guideMaterial).transform;
+            CreateHologramPrimitive(
+                "Left Leg",
+                PrimitiveType.Capsule,
+                body,
+                new Vector3(-0.11f, 0.55f, 0f),
+                new Vector3(0.13f, 0.45f, 0.13f),
+                Quaternion.identity,
+                guideMaterial);
+            CreateHologramPrimitive(
+                "Right Leg",
+                PrimitiveType.Capsule,
+                body,
+                new Vector3(0.11f, 0.55f, 0f),
+                new Vector3(0.13f, 0.45f, 0.13f),
+                Quaternion.identity,
+                guideMaterial);
+            CreateHologramPrimitive(
+                "Torso",
+                PrimitiveType.Capsule,
+                body,
+                new Vector3(0f, 1.25f, 0f),
+                new Vector3(0.42f, 0.42f, 0.22f),
+                Quaternion.identity,
+                guideMaterial);
+            CreateHologramPrimitive(
+                "Left Arm",
+                PrimitiveType.Capsule,
+                body,
+                new Vector3(-0.29f, 1.24f, 0f),
+                new Vector3(0.10f, 0.38f, 0.10f),
+                Quaternion.Euler(0f, 0f, -5f),
+                guideMaterial);
+            CreateHologramPrimitive(
+                "Right Arm",
+                PrimitiveType.Capsule,
+                body,
+                new Vector3(0.29f, 1.24f, 0f),
+                new Vector3(0.10f, 0.38f, 0.10f),
+                Quaternion.Euler(0f, 0f, 5f),
+                guideMaterial);
+            CreateHologramPrimitive(
+                "Head",
+                PrimitiveType.Sphere,
+                body,
+                new Vector3(0f, 1.67f, 0f),
+                new Vector3(0.25f, 0.28f, 0.24f),
+                Quaternion.identity,
+                guideMaterial);
+
+            var audioSource = guideRoot.gameObject.AddComponent<AudioSource>();
+            audioSource.playOnAwake = false;
+            audioSource.loop = false;
+            audioSource.spatialBlend = 1f;
+            audioSource.rolloffMode = AudioRolloffMode.Logarithmic;
+            audioSource.minDistance = 1f;
+            audioSource.maxDistance = 8f;
+            audioSource.dopplerLevel = 0f;
+
+            var subtitleCanvasObject = new GameObject(
+                "Portfolio Guide Subtitles",
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasScaler));
+            subtitleCanvasObject.transform.SetParent(parent, false);
+            var subtitleFacing = Vector3.ProjectOnPlane(
+                GuideFacingTarget - GuideSubtitlePosition,
+                WorldUp).normalized;
+            subtitleCanvasObject.transform.SetPositionAndRotation(
+                GuideSubtitlePosition,
+                MapAuthoredFrameToWorld(
+                    CanvasReadableLocalFront,
+                    Vector3.up,
+                    subtitleFacing,
+                    WorldUp));
+
+            var subtitleCanvas = subtitleCanvasObject.GetComponent<Canvas>();
+            subtitleCanvas.renderMode = RenderMode.WorldSpace;
+            subtitleCanvas.sortingOrder = 6;
+            var subtitleRect = subtitleCanvasObject.GetComponent<RectTransform>();
+            subtitleRect.sizeDelta = new Vector2(760f, 240f);
+            subtitleRect.localScale = Vector3.one * 0.0015f;
+
+            var subtitleBackground = CreatePanel(
+                "Guide Subtitle Background",
+                subtitleRect,
+                Vector2.zero,
+                new Vector2(760f, 240f),
+                new Color(0.015f, 0.065f, 0.10f, 0.96f));
+            CreateText(
+                "Guide Title",
+                subtitleBackground,
+                "PORTFOLIO GUIDE",
+                new Vector2(24f, -18f),
+                new Vector2(500f, 42f),
+                28f,
+                AccentText,
+                TextAlignmentOptions.Left);
+            var subtitle = CreateText(
+                "Guide Subtitle",
+                subtitleBackground,
+                FinancialGuideController.WelcomeCopy,
+                new Vector2(24f, -68f),
+                new Vector2(712f, 118f),
+                24f,
+                PrimaryText,
+                TextAlignmentOptions.TopLeft);
+            CreateText(
+                "Replay Guide Label",
+                subtitleBackground,
+                "REPLAY GUIDE  •  BUTTON BELOW",
+                new Vector2(370f, -198f),
+                new Vector2(366f, 28f),
+                19f,
+                MutedText,
+                TextAlignmentOptions.Right);
+            SetLayerRecursively(subtitleCanvasObject.transform, IgnoreRaycastLayer);
+
+            var replayObject = InstantiatePrefab(
+                RunButtonVisualPrefabPath,
+                parent,
+                GuideReplayPosition,
+                Quaternion.identity,
+                "Replay Guide Button");
+            var replayButton = ConfigureButton(replayObject);
+
+            var guide = guideRoot.gameObject.AddComponent<FinancialGuideController>();
+            guide.Configure(
+                subtitle,
+                speakingRing,
+                audioSource,
+                AssetDatabase.LoadAssetAtPath<AudioClip>(GuideWelcomeAudioPath),
+                AssetDatabase.LoadAssetAtPath<AudioClip>(GuideRiskAudioPath),
+                AssetDatabase.LoadAssetAtPath<AudioClip>(GuideHorizonAudioPath),
+                AssetDatabase.LoadAssetAtPath<AudioClip>(GuideStressAudioPath),
+                AssetDatabase.LoadAssetAtPath<AudioClip>(GuideAnalysisAudioPath));
+            UnityEventTools.AddPersistentListener(
+                replayButton.Pressed,
+                guide.ReplayCurrentCue);
+
+            ValidatePortfolioGuide(
+                body,
+                subtitleRect,
+                replayObject,
+                replayButton,
+                guideMaterial);
+            EditorUtility.SetDirty(replayButton);
+            EditorUtility.SetDirty(guide);
+            return guide;
+        }
+
+        static GameObject CreateHologramPrimitive(
+            string name,
+            PrimitiveType primitiveType,
+            Transform parent,
+            Vector3 localPosition,
+            Vector3 localScale,
+            Quaternion localRotation,
+            Material material)
+        {
+            var part = GameObject.CreatePrimitive(primitiveType);
+            part.name = name;
+            part.layer = IgnoreRaycastLayer;
+            part.transform.SetParent(parent, false);
+            part.transform.localPosition = localPosition;
+            part.transform.localRotation = localRotation;
+            part.transform.localScale = localScale;
+
+            var collider = part.GetComponent<Collider>();
+            if (collider != null)
+                UnityEngine.Object.DestroyImmediate(collider);
+
+            var renderer = part.GetComponent<Renderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            renderer.lightProbeUsage = UnityEngine.Rendering.LightProbeUsage.Off;
+            renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
+            return part;
+        }
+
+        static void ValidatePortfolioGuide(
+            Transform body,
+            RectTransform subtitlePanel,
+            GameObject replayObject,
+            FinancialActionButton replayButton,
+            Material guideMaterial)
+        {
+            var renderers = body.GetComponentsInChildren<Renderer>(true);
+            if (renderers.Length == 0 || renderers.Length > 8)
+                throw new InvalidOperationException(
+                    "Portfolio Guide must contain between one and eight primitive renderers.");
+
+            if (body.GetComponentsInChildren<Collider>(true).Length != 0)
+                throw new InvalidOperationException(
+                    "Portfolio Guide body must not contain any Collider.");
+
+            var bodyBounds = renderers[0].bounds;
+            foreach (var renderer in renderers)
+            {
+                bodyBounds.Encapsulate(renderer.bounds);
+                if (renderer.sharedMaterial != guideMaterial ||
+                    renderer.shadowCastingMode !=
+                    UnityEngine.Rendering.ShadowCastingMode.Off ||
+                    renderer.receiveShadows)
+                {
+                    throw new InvalidOperationException(
+                        renderer.name +
+                        " must use the project-owned no-shadow hologram material.");
+                }
+            }
+
+            if (bodyBounds.min.x <= 1.20f)
+                throw new InvalidOperationException(
+                    "Portfolio Guide body overlaps the dashboard or central movement corridor.");
+
+            ValidateLayerRecursively(body, IgnoreRaycastLayer, "Portfolio Guide body");
+            ValidateLayerRecursively(
+                subtitlePanel,
+                IgnoreRaycastLayer,
+                "Portfolio Guide subtitles");
+            if (subtitlePanel.GetComponentsInChildren<Collider>(true).Length != 0)
+                throw new InvalidOperationException(
+                    "Portfolio Guide subtitles must not contain a Collider.");
+
+            var corners = new Vector3[4];
+            subtitlePanel.GetWorldCorners(corners);
+            var minimumSubtitleX = corners[0].x;
+            foreach (var corner in corners)
+                minimumSubtitleX = Mathf.Min(minimumSubtitleX, corner.x);
+            if (minimumSubtitleX <= 1.20f)
+                throw new InvalidOperationException(
+                    "Portfolio Guide subtitles overlap the dashboard or central path.");
+
+            var replayCollider = replayObject.GetComponent<Collider>();
+            if (replayObject.layer == IgnoreRaycastLayer ||
+                replayButton == null ||
+                replayCollider == null ||
+                !replayCollider.enabled)
+            {
+                throw new InvalidOperationException(
+                    "Replay Guide must remain on an interactable layer with an enabled Collider.");
+            }
+
+            var consoleStandingPoint = new Vector3(0f, GuideReplayPosition.y, ConsoleZ);
+            if (Vector3.Distance(replayObject.transform.position, consoleStandingPoint) > 5f ||
+                replayObject.transform.position.y < 0.75f ||
+                replayObject.transform.position.y > 1.35f)
+            {
+                throw new InvalidOperationException(
+                    "Replay Guide is outside practical console ray range or arm height.");
+            }
+        }
+
+        static void SetLayerRecursively(Transform root, int layer)
+        {
+            root.gameObject.layer = layer;
+            foreach (Transform child in root)
+                SetLayerRecursively(child, layer);
+        }
+
+        static void ValidateLayerRecursively(Transform root, int expectedLayer, string label)
+        {
+            if (root.gameObject.layer != expectedLayer)
+                throw new InvalidOperationException(
+                    label + " contains an object on the wrong layer: " + root.name);
+
+            foreach (Transform child in root)
+                ValidateLayerRecursively(child, expectedLayer, label);
+        }
+
         static FinancialRoomController BuildControlsAndController(
             Transform parent,
-            FinancialDashboardView dashboard)
+            FinancialDashboardView dashboard,
+            FinancialGuideController guide)
         {
             var controller = dashboard.GetComponent<FinancialRoomController>();
             if (controller == null)
@@ -1277,6 +1631,7 @@ namespace InterviewDemo.FinancialDataRoom.Editor
                 leverControl,
                 runButton,
                 resetButton);
+            controller.ConfigureGuide(guide);
 
             EditorUtility.SetDirty(knobControl);
             EditorUtility.SetDirty(sliderControl);

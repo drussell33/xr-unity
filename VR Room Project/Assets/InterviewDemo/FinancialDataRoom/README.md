@@ -14,8 +14,10 @@ settings.
   forecast lines.
 - `FinancialPhysicalControl` and `FinancialActionButton` provide reusable
   ray/direct/poke interaction, visual feedback, and haptics.
+- `FinancialGuideController` owns one-time onboarding cues, subtitles, optional
+  spatial narration, Replay Guide behavior, and its lightweight speaking pulse.
 - `FinancialDataRoomSceneBuilder` is authoritative for all scene hierarchy,
-  references, XR setup, layout, and generated environment objects.
+  references, XR setup, layout, generated environment objects, and the guide.
 
 Do not hand-edit the generated scene as the primary implementation. Rebuild it
 through the menu command after changing the builder.
@@ -41,12 +43,60 @@ prefabs, `Basic_Hotel`, or other existing scenes.
 - **Investment Horizon slider:** selects 1–10 years
 - **Base / Stress lever:** selects the active scenario
 - **Run Analysis:** records the current completed result
+- **Replay Guide:** replays the most relevant current Portfolio Guide cue
 - **Reset:** restores portfolio state, controls, guidance, and dashboard without
   moving or rotating the XR Origin
 
 Ray, direct, and poke interaction remain enabled. Controls and buttons provide
 hover/select tint, press or movement feedback, and brief controller haptics.
 The XR Interaction Simulator is tagged `EditorOnly`.
+
+## Portfolio Guide
+
+The scene builder creates a static, gender-neutral human-like guide from eight
+Unity primitives at `(2.15, 0, 4.85)`, beside the dashboard and outside the
+central walking path. Its subtitle panel faces the normal console standing
+position. Guide geometry and subtitles use Ignore Raycast, have no colliders,
+cast no shadows, and use no particles, skinned meshes, animation rigs, or
+dynamic lights. Only the separate Replay Guide button is interactable.
+
+The project-owned `FinancialGuide_Hologram` material uses URP/Unlit in opaque,
+high-opacity mode to avoid transparent sorting artifacts on Quest. The guide
+uses at most eight primitive renderers, one shared material, one small
+world-space Canvas, one AudioSource, and no idle per-frame update. Only its base
+ring pulses while a cue is active.
+
+Automatic cues play once per session:
+
+- **Welcome:** "Welcome to the Portfolio Stress Lab. Move to the console to
+  explore how risk, time horizon, and market conditions affect a hypothetical
+  portfolio."
+- **Risk:** "Risk shifts this illustrative portfolio between equities, bonds,
+  and cash. Higher equity exposure raises both expected return and volatility."
+- **Horizon:** "Investment horizon controls how much time the portfolio has to
+  compound or recover from a simulated market decline."
+- **Stress:** "Market Stress adds an early drawdown and partial recovery.
+  Compare it with the baseline forecast to understand the downside tradeoff."
+- **Analysis Complete:** "Analysis complete. Compare the forecast lines,
+  projected value, and drawdown to discuss the tradeoff between growth
+  potential and risk. These results are illustrative only."
+
+Risk, Horizon, and Stress cues are emitted only while their XRI controls are
+actively selected. Initialization, builder configuration, programmatic
+`SetValue(..., false)`, and Reset remain silent. Reset clears cue history and
+returns the guide to Welcome without moving the player.
+
+Optional narration files:
+
+- `Audio/PortfolioGuide_Welcome.wav`
+- `Audio/PortfolioGuide_Risk.wav`
+- `Audio/PortfolioGuide_Horizon.wav`
+- `Audio/PortfolioGuide_MarketStress.wav`
+- `Audio/PortfolioGuide_AnalysisComplete.wav`
+
+These files are intentionally not included. The builder wires any matching clip
+that exists and safely leaves missing slots null. Subtitles and speaking-ring
+emphasis continue to work without audio; no placeholder sound is played.
 
 ## Deterministic model assumptions
 
@@ -100,6 +150,12 @@ advice.
 6. Confirm both chart lines share one scale and remain readable.
 7. Complete an analysis, change an input, rerun, then reset.
 8. Confirm Reset never moves the XR Origin.
+9. From the console, confirm the guide and subtitles do not obscure the
+   dashboard and Replay Guide is reachable by ray.
+10. Trigger each cue once, repeat each interaction to confirm no automatic
+    repetition, and verify Replay follows the latest relevant cue.
+11. With no narration files present, confirm subtitles and the speaking pulse
+    work without Console errors.
 
 ## Quest 3 validation
 
@@ -112,12 +168,16 @@ advice.
 5. Run the full interaction flow with ray and direct interaction.
 6. Confirm dashboard readability, Run, stale-input messaging, and state-only
    Reset.
-7. Complete a stable five-minute headset play test.
+7. Confirm guide subtitle readability and hologram stability from the console.
+8. Test Replay Guide by ray, then approach it for direct and poke interaction.
+9. Confirm Reset restores Welcome without changing player position.
+10. Complete a stable five-minute headset play test.
 
 ## Known limitations
 
 - Values are illustrative and not calibrated to live markets.
-- No networking, persistence, analytics, audio, localization, or live data.
+- No networking, persistence, analytics, synthesized narration, localization,
+  or live data. Prerecorded narration clips are optional and project-local.
 - The chart intentionally uses lightweight LineRenderers without interactive
   axes or inspection.
 - Build Settings and Android builds remain manual review steps.

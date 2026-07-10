@@ -18,6 +18,7 @@ namespace InterviewDemo.FinancialDataRoom
         [SerializeField] FinancialPhysicalControl scenarioControl;
         [SerializeField] FinancialActionButton runButton;
         [SerializeField] FinancialActionButton resetButton;
+        [SerializeField] FinancialGuideController guide;
 
         [Header("Defaults")]
         [SerializeField, Range(0f, 1f)] float defaultRisk = 0.5f;
@@ -58,6 +59,11 @@ namespace InterviewDemo.FinancialDataRoom
             resetButton = reset;
         }
 
+        public void ConfigureGuide(FinancialGuideController portfolioGuide)
+        {
+            guide = portfolioGuide;
+        }
+
         void Awake()
         {
             risk = defaultRisk;
@@ -81,13 +87,19 @@ namespace InterviewDemo.FinancialDataRoom
             dashboard?.ClearAnalysisComplete();
             Recalculate();
             RefreshStatus();
+            guide?.ResetGuide();
             StartCoroutine(CompleteMovementHint());
         }
 
         public void SetRisk(float normalizedRisk)
         {
             risk = Mathf.Clamp01(normalizedRisk);
-            riskStepComplete = true;
+            if (riskControl != null && riskControl.isSelected)
+            {
+                riskStepComplete = true;
+                guide?.NotifyRiskInteraction();
+            }
+
             InvalidateCompletedAnalysis();
             Recalculate();
             RefreshStatus();
@@ -96,7 +108,12 @@ namespace InterviewDemo.FinancialDataRoom
         public void SetHorizon(float normalizedHorizon)
         {
             horizonYears = 1 + Mathf.RoundToInt(Mathf.Clamp01(normalizedHorizon) * 9f);
-            horizonStepComplete = true;
+            if (horizonControl != null && horizonControl.isSelected)
+            {
+                horizonStepComplete = true;
+                guide?.NotifyHorizonInteraction();
+            }
+
             InvalidateCompletedAnalysis();
             Recalculate();
             RefreshStatus();
@@ -105,8 +122,11 @@ namespace InterviewDemo.FinancialDataRoom
         public void SetScenario(float normalizedScenario)
         {
             stressScenario = normalizedScenario >= 0.5f;
-            if (stressScenario)
+            if (stressScenario && scenarioControl != null && scenarioControl.isSelected)
+            {
                 stressStepComplete = true;
+                guide?.NotifyStressInteraction();
+            }
 
             InvalidateCompletedAnalysis();
             Recalculate();
@@ -119,6 +139,7 @@ namespace InterviewDemo.FinancialDataRoom
             analysisStale = false;
             var projection = Recalculate();
             dashboard?.ShowAnalysisComplete(projection, risk, horizonYears, stressScenario);
+            guide?.NotifyAnalysisComplete();
             RefreshStatus();
         }
 
@@ -139,6 +160,7 @@ namespace InterviewDemo.FinancialDataRoom
             resetButton?.ResetVisual();
             dashboard?.ClearAnalysisComplete();
             Recalculate();
+            guide?.ResetGuide();
             ShowTemporaryStatus("PORTFOLIO RESET TO DEFAULTS", 1.5f);
         }
 
